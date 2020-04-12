@@ -8,9 +8,9 @@ import subprocess
 import re
 import os.path
 import glob
-import sys
 
 debug = False
+
 
 def get_make_variables(path, makefile="Makefile", expected_failure=False, variables={}):
     """
@@ -20,9 +20,9 @@ def get_make_variables(path, makefile="Makefile", expected_failure=False, variab
 
     Overrides IDF_PATH= to avoid recursively evaluating the entire project Makefile structure.
     """
-    variable_setters = [ ("%s=%s" % (k,v)) for (k,v) in variables.items() ]
+    variable_setters = [("%s=%s" % (k,v)) for (k,v) in variables.items()]
 
-    cmdline = ["make", "-rpn", "-C", path, "-f", makefile ] + variable_setters
+    cmdline = ["make", "-rpn", "-C", path, "-f", makefile] + variable_setters
     if debug:
         print("Running %s..." % (" ".join(cmdline)))
 
@@ -42,7 +42,7 @@ def get_make_variables(path, makefile="Makefile", expected_failure=False, variab
     result = {}
     BUILT_IN_VARS = set(["MAKEFILE_LIST", "SHELL", "CURDIR", "MAKEFLAGS"])
 
-    for line in output.decode().split("\n"):
+    for line in output.decode('utf-8').split("\n"):
         if line.startswith("# makefile"):  # this line appears before any variable defined in the makefile itself
             next_is_makefile = True
         elif next_is_makefile:
@@ -54,15 +54,16 @@ def get_make_variables(path, makefile="Makefile", expected_failure=False, variab
 
     return result
 
+
 def get_component_variables(project_path, component_path):
     make_vars = get_make_variables(component_path,
                                    os.path.join(os.environ["IDF_PATH"],
                                                 "make",
                                                 "component_wrapper.mk"),
                                    expected_failure=True,
-                                   variables = {
-                                       "COMPONENT_MAKEFILE" : os.path.join(component_path, "component.mk"),
-                                       "COMPONENT_NAME" : os.path.basename(component_path),
+                                   variables={
+                                       "COMPONENT_MAKEFILE": os.path.join(component_path, "component.mk"),
+                                       "COMPONENT_NAME": os.path.basename(component_path),
                                        "PROJECT_PATH": project_path,
                                    })
 
@@ -70,32 +71,31 @@ def get_component_variables(project_path, component_path):
         # Convert to sources
         def find_src(obj):
             obj = os.path.splitext(obj)[0]
-            for ext in [ "c", "cpp", "S" ]:
+            for ext in ["c", "cpp", "S"]:
                 if os.path.exists(os.path.join(component_path, obj) + "." + ext):
                     return obj + "." + ext
             print("WARNING: Can't find source file for component %s COMPONENT_OBJS %s" % (component_path, obj))
             return None
 
         srcs = []
-        for obj in make_vars["COMPONENT_OBJS"].split(" "):
+        for obj in make_vars["COMPONENT_OBJS"].split():
             src = find_src(obj)
             if src is not None:
                 srcs.append(src)
         make_vars["COMPONENT_SRCS"] = " ".join(srcs)
     else:
         component_srcs = list()
-        for component_srcdir in make_vars.get("COMPONENT_SRCDIRS", ".").split(" "):
+        for component_srcdir in make_vars.get("COMPONENT_SRCDIRS", ".").split():
             component_srcdir_path = os.path.abspath(os.path.join(component_path, component_srcdir))
-            
+
             srcs = list()
             srcs += glob.glob(os.path.join(component_srcdir_path, "*.[cS]"))
             srcs += glob.glob(os.path.join(component_srcdir_path, "*.cpp"))
             srcs = [('"%s"' % str(os.path.relpath(s, component_path))) for s in srcs]
 
-    make_vars["COMPONENT_ADD_INCLUDEDIRS"] = make_vars.get("COMPONENT_ADD_INCLUDEDIRS", "include")
-            component_srcs += srcs
+        make_vars["COMPONENT_ADD_INCLUDEDIRS"] = make_vars.get("COMPONENT_ADD_INCLUDEDIRS", "include")
+        component_srcs += srcs
         make_vars["COMPONENT_SRCS"] = " ".join(component_srcs)
-
 
     return make_vars
 
@@ -111,14 +111,20 @@ def convert_project(project_path):
         raise RuntimeError("This project already has a CMakeLists.txt file")
 
     project_vars = get_make_variables(project_path, expected_failure=True)
-    if not "PROJECT_NAME" in project_vars:
+    if "PROJECT_NAME" not in project_vars:
         raise RuntimeError("PROJECT_NAME does not appear to be defined in IDF project Makefile at %s" % project_path)
 
-    component_paths = project_vars["COMPONENT_PATHS"].split(" ")
+    component_paths = project_vars["COMPONENT_PATHS"].split()
+
+    converted_components = 0
 
     # Convert components as needed
     for p in component_paths:
-        convert_component(project_path, p)
+        if "MSYSTEM" in os.environ:
+            cmd = ["cygpath", "-w", p]
+            p = subprocess.check_output(cmd).strip()
+
+        converted_components += convert_component(project_path, p)
 
     project_name = project_vars["PROJECT_NAME"]
 
@@ -139,13 +145,21 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
     print("Converted project %s" % project_cmakelists)
 
+    if converted_components > 0:
+        print("Note: Newly created component CMakeLists.txt do not have any REQUIRES or PRIV_REQUIRES "
+              "lists to declare their component requirements. Builds may fail to include other "
+              "components' header files. If so requirements need to be added to the components' "
+              "CMakeLists.txt files. See the 'Component Requirements' section of the "
+              "Build System docs for more details.")
+
+
 def convert_component(project_path, component_path):
     if debug:
         print("Converting %s..." % (component_path))
     cmakelists_path = os.path.join(component_path, "CMakeLists.txt")
     if os.path.exists(cmakelists_path):
         print("Skipping already-converted component %s..." % cmakelists_path)
-        return
+        return 0
     v = get_component_variables(project_path, component_path)
 
     # Look up all the variables before we start writing the file, so it's not
@@ -156,21 +170,19 @@ def convert_component(project_path, component_path):
     cflags = v.get("CFLAGS", None)
 
     with open(cmakelists_path, "w") as f:
-        f.write("set(COMPONENT_ADD_INCLUDEDIRS %s)\n\n" % component_add_includedirs)
-
-        f.write("# Edit following two lines to set component requirements (see docs)\n")
-        f.write("set(COMPONENT_REQUIRES "")\n")
-        f.write("set(COMPONENT_PRIV_REQUIRES "")\n\n")
-
         if component_srcs is not None:
-            f.write("set(COMPONENT_SRCS %s)\n\n" % component_srcs)
-            f.write("register_component()\n")
+            f.write("idf_component_register(SRCS %s)\n" % component_srcs)
+            f.write("                       INCLUDE_DIRS %s" % component_add_includedirs)
+            f.write("                       # Edit following two lines to set component requirements (see docs)\n")
+            f.write("                       REQUIRES "")\n")
+            f.write("                       PRIV_REQUIRES "")\n\n")
         else:
-            f.write("register_config_only_component()\n")
+            f.write("idf_component_register()\n")
         if cflags is not None:
-            f.write("component_compile_options(%s)\n" % cflags)
+            f.write("target_compile_options(${COMPONENT_LIB} PRIVATE %s)\n" % cflags)
 
     print("Converted %s" % cmakelists_path)
+    return 1
 
 
 def main():

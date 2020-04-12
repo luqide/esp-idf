@@ -16,129 +16,70 @@
 
 from __future__ import print_function
 from __future__ import unicode_literals
-import sys, os
+import sys
+import os
+import os.path
 import re
 import subprocess
-import shlex
+from sanitize_version import sanitize_version
+from idf_extensions.util import download_file_if_missing
 
-# Note: If extensions (or modules to document with autodoc) are in another directory,
-# add these directories to sys.path here. If the directory is relative to the
-# documentation root, use os.path.abspath to make it absolute
+# build_docs on the CI server sometimes fails under Python3. This is a workaround:
+sys.setrecursionlimit(3500)
 
-from local_util import run_cmd_get_output, copy_if_modified
-
-
-try:
-    builddir = os.environ['BUILDDIR']
-except KeyError:
-    builddir = '_build'
-
-# Fill in a default IDF_PATH if it's missing (ie when Read The Docs is building the docs)
-try:
-    idf_path = os.environ['IDF_PATH']
-except KeyError:
-    idf_path = os.path.realpath(os.path.join(os.path.dirname(__file__), '..'))
-
-def call_with_python(cmd):
-    # using sys.executable ensures that the scripts are called with the same Python interpreter
-    if os.system('{} {}'.format(sys.executable, cmd)) != 0:
-        raise RuntimeError('{} failed'.format(cmd))
-
-# Call Doxygen to get XML files from the header files
-print("Calling Doxygen to generate latest XML files")
-if os.system("doxygen ../Doxyfile") != 0:
-    raise RuntimeError('Doxygen call failed')
-
-# Doxygen has generated XML files in 'xml' directory.
-# Copy them to 'xml_in', only touching the files which have changed.
-copy_if_modified('xml/', 'xml_in/')
-
-# Generate 'api_name.inc' files using the XML files by Doxygen
-call_with_python('../gen-dxd.py')
-
-# Generate 'kconfig.inc' file from components' Kconfig files
-print("Generating kconfig.inc from kconfig contents")
-kconfig_inc_path = '{}/inc/kconfig.inc'.format(builddir)
-temp_sdkconfig_path = '{}/sdkconfig.tmp'.format(builddir)
-# note: trimming "examples" dir from KConfig/KConfig.projbuild as MQTT submodule
-# has its own examples in the submodule.
-kconfigs = subprocess.check_output(["find", "../../components",
-                                    "-name", "examples", "-prune",
-                                    "-o", "-name", "Kconfig", "-print"]).decode()
-kconfig_projbuilds = subprocess.check_output(["find", "../../components",
-                                              "-name", "examples", "-prune",
-                                              "-o", "-name", "Kconfig.projbuild", "-print"]).decode()
-confgen_args = [sys.executable,
-                "../../tools/kconfig_new/confgen.py",
-                "--kconfig", "../../Kconfig",
-                "--config", temp_sdkconfig_path,
-                "--create-config-if-missing",
-                "--env", "COMPONENT_KCONFIGS={}".format(kconfigs),
-                "--env", "COMPONENT_KCONFIGS_PROJBUILD={}".format(kconfig_projbuilds),
-                "--env", "IDF_PATH={}".format(idf_path),
-                "--output", "docs", kconfig_inc_path + '.in'
-]
-subprocess.check_call(confgen_args)
-copy_if_modified(kconfig_inc_path + '.in', kconfig_inc_path)
-
-# Generate 'esp_err_defs.inc' file with ESP_ERR_ error code definitions
-esp_err_inc_path = '{}/inc/esp_err_defs.inc'.format(builddir)
-call_with_python('../../tools/gen_esp_err_to_name.py --rst_output ' + esp_err_inc_path + '.in')
-copy_if_modified(esp_err_inc_path + '.in', esp_err_inc_path)
-
-# Generate version-related includes
-#
-# (Note: this is in a function as it needs to access configuration to get the language)
-def generate_version_specific_includes(app):
-    print("Generating version-specific includes...")
-    version_tmpdir = '{}/version_inc'.format(builddir)
-    call_with_python('../gen-version-specific-includes.py {} {}'.format(app.config.language, version_tmpdir))
-    copy_if_modified(version_tmpdir, '{}/inc'.format(builddir))
-
-# Generate toolchain download links
-print("Generating toolchain download links")
-base_url = 'https://dl.espressif.com/dl/'
-toolchain_tmpdir = '{}/toolchain_inc'.format(builddir)
-call_with_python('../gen-toolchain-links.py ../../tools/toolchain_versions.mk {} {}'.format(base_url, toolchain_tmpdir))
-copy_if_modified(toolchain_tmpdir, '{}/inc'.format(builddir))
+config_dir = os.path.abspath(os.path.dirname(__file__))
 
 # http://stackoverflow.com/questions/12772927/specifying-an-online-image-in-sphinx-restructuredtext-format
-# 
+#
 suppress_warnings = ['image.nonlocal_uri']
 
 # -- General configuration ------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.
-#needs_sphinx = '1.0'
+# needs_sphinx = '1.0'
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = ['breathe',
-                   'link-roles',
-                   'sphinxcontrib.blockdiag',
-                   'sphinxcontrib.seqdiag',
-                   'sphinxcontrib.actdiag',
-                   'sphinxcontrib.nwdiag',
-                   'sphinxcontrib.rackdiag',
-                   'sphinxcontrib.packetdiag'
-                  ]
 
-# Set up font for blockdiag, nwdiag, rackdiag and packetdiag
-blockdiag_fontpath = '../_static/DejaVuSans.ttf'
-seqdiag_fontpath = '../_static/DejaVuSans.ttf'
-actdiag_fontpath = '../_static/DejaVuSans.ttf'
-nwdiag_fontpath = '../_static/DejaVuSans.ttf'
-rackdiag_fontpath = '../_static/DejaVuSans.ttf'
-packetdiag_fontpath = '../_static/DejaVuSans.ttf'
+              'sphinx.ext.todo',
+              'sphinx_idf_theme',
+              'sphinxcontrib.blockdiag',
+              'sphinxcontrib.seqdiag',
+              'sphinxcontrib.actdiag',
+              'sphinxcontrib.nwdiag',
+              'sphinxcontrib.rackdiag',
+              'sphinxcontrib.packetdiag',
 
-# Breathe extension variables
+              'extensions.html_redirects',
+              'extensions.toctree_filter',
+              'extensions.list_filter',
 
-# Doxygen regenerates files in 'xml/' directory every time,
-# but we copy files to 'xml_in/' only when they change, to speed up
-# incremental builds.
-breathe_projects = { "esp32-idf": "xml_in/" }
-breathe_default_project = "esp32-idf"
+              'idf_extensions.include_build_file',
+              'idf_extensions.link_roles',
+              'idf_extensions.build_system',
+              'idf_extensions.esp_err_definitions',
+              'idf_extensions.gen_toolchain_links',
+              'idf_extensions.gen_version_specific_includes',
+              'idf_extensions.kconfig_reference',
+              'idf_extensions.run_doxygen',
+              'idf_extensions.gen_idf_tools_links',
+              'idf_extensions.format_idf_target',
+
+              # from https://github.com/pfalcon/sphinx_selective_exclude
+              'sphinx_selective_exclude.eager_only',
+              # TODO: determine if we need search_auto_exclude
+              # 'sphinx_selective_exclude.search_auto_exclude',
+              ]
+
+# sphinx.ext.todo extension parameters
+# If the below parameter is True, the extension
+# produces output, else it produces nothing.
+todo_include_todos = False
+
+# Enabling this fixes cropping of blockdiag edge labels
+seqdiag_antialias = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -146,12 +87,11 @@ templates_path = ['_templates']
 # The suffix of source filenames.
 source_suffix = ['.rst', '.md']
 
-source_parsers = {
-       '.md': 'recommonmark.parser.CommonMarkParser',
-    }
+source_parsers = {'.md': 'recommonmark.parser.CommonMarkParser',
+                  }
 
 # The encoding of source files.
-#source_encoding = 'utf-8-sig'
+# source_encoding = 'utf-8-sig'
 
 # The master toctree document.
 master_doc = 'index'
@@ -162,73 +102,133 @@ master_doc = 'index'
 # built documents.
 #
 
-# Readthedocs largely ignores 'version' and 'release', and displays one of
-# 'latest', tag name, or branch name, depending on the build type.
-# Still, this is useful for non-RTD builds.
-# This is supposed to be "the short X.Y version", but it's the only version
+# This is the full exact version, canonical git version description
 # visible when you open index.html.
-# Display full version to make things less confusing.
-version = run_cmd_get_output('git describe')
-# The full version, including alpha/beta/rc tags.
-# If needed, nearest tag is returned by 'git describe --abbrev=0'.
-release = version
+version = subprocess.check_output(['git', 'describe']).strip().decode('utf-8')
+
+# The 'release' version is the same as version for non-CI builds, but for CI
+# builds on a branch then it's replaced with the branch name
+release = sanitize_version(version)
+
 print('Version: {0}  Release: {1}'.format(version, release))
 
 # There are two options for replacing |today|: either, you set today to some
 # non-false value, then it is used:
-#today = ''
+# today = ''
 # Else, today_fmt is used as the format for a strftime call.
-#today_fmt = '%B %d, %Y'
+# today_fmt = '%B %d, %Y'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = ['_build','README.md']
+exclude_patterns = ['**/inc/**', '_static', '**/_build']
+
+
+# Add target-specific excludes based on tags (for the IDF_TARGET). Haven't found any better way to do this yet
+def update_exclude_patterns(tags):
+    if "esp32" not in tags:
+        # Exclude ESP32-only document pages so they aren't found in the initial search for .rst files
+        # note: in toctrees, these also need to be marked with a :esp32: filter
+        for e in ['api-guides/blufi.rst',
+                  'api-guides/build-system-legacy.rst',
+                  'api-guides/esp-ble-mesh/**',
+                  'api-guides/RF_calibration.rst',  # temporary until support re-added in esp_wifi
+                  'api-guides/ulp-legacy.rst',
+                  'api-guides/unit-tests-legacy.rst',
+                  'api-guides/ulp_instruction_set.rst',
+                  'api-guides/jtag-debugging/configure-wrover.rst',
+                  'api-reference/system/himem.rst',
+                  'api-reference/bluetooth/**',
+                  'api-reference/peripherals/sdio_slave.rst',
+                  'api-reference/peripherals/esp_slave_protocol.rst',
+                  'api-reference/peripherals/mcpwm.rst',
+                  'api-reference/peripherals/sd_pullup_requirements.rst',
+                  'api-reference/peripherals/sdmmc_host.rst',
+                  'api-reference/protocols/esp_serial_slave_link.rst',
+                  'api-reference/system/ipc.rst',
+                  'get-started-legacy/**',
+                  'security/secure-boot-v1.rst',
+                  'security/secure-boot-v2.rst',
+                  'gnu-make-legacy.rst',
+                  'hw-reference/esp32/**',
+                  ]:
+            exclude_patterns.append(e)
+
+    if "esp32s2" not in tags:
+        # Exclude ESP32-S2-only document pages so they aren't found in the initial search for .rst files
+        # note: in toctrees, these also need to be marked with a :esp32: filter
+        for e in ['esp32s2.rst',
+                  'hw-reference/esp32s2/**',
+                  'api-guides/ulps2_instruction_set.rst',
+                  'api-reference/peripherals/temp_sensor.rst']:
+            exclude_patterns.append(e)
+
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
-#default_role = None
+# default_role = None
 
 # If true, '()' will be appended to :func: etc. cross-reference text.
-#add_function_parentheses = True
+# add_function_parentheses = True
 
 # If true, the current module name will be prepended to all description
 # unit titles (such as .. function::).
-#add_module_names = True
+# add_module_names = True
 
 # If true, sectionauthor and moduleauthor directives will be shown in the
 # output. They are ignored by default.
-#show_authors = False
+# show_authors = False
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
 
 # A list of ignored prefixes for module index sorting.
-#modindex_common_prefix = []
+# modindex_common_prefix = []
 
 # If true, keep warnings as "system message" paragraphs in the built documents.
-#keep_warnings = False
+# keep_warnings = False
 
+
+# Extra options required by sphinx_idf_theme
+project_slug = 'esp-idf'
+versions_url = 'https://dl.espressif.com/dl/esp-idf/idf_versions.js'
+
+idf_targets = ['esp32', 'esp32s2']
+languages = ['en', 'zh_CN']
+
+project_homepage = "https://github.com/espressif/esp-idf"
 
 # -- Options for HTML output ----------------------------------------------
 
+# Custom added feature to allow redirecting old URLs
+#
+# Redirects should be listed in page_redirects.xt
+#
+with open("../page_redirects.txt") as f:
+    lines = [re.sub(" +", " ", l.strip()) for l in f.readlines() if l.strip() != "" and not l.startswith("#")]
+    for line in lines:  # check for well-formed entries
+        if len(line.split(' ')) != 2:
+            raise RuntimeError("Invalid line in page_redirects.txt: %s" % line)
+html_redirect_pages = [tuple(l.split(' ')) for l in lines]
+
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = 'sphinx_rtd_theme'
+
+html_theme = 'sphinx_idf_theme'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-#html_theme_options = {}
+# html_theme_options = {}
 
 # Add any paths that contain custom themes here, relative to this directory.
-#html_theme_path = []
+# html_theme_path = []
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".
-#html_title = None
+# html_title = None
 
 # A shorter title for the navigation bar.  Default is the same as html_title.
-#html_short_title = None
+# html_short_title = None
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
@@ -237,7 +237,7 @@ html_logo = "../_static/espressif-logo.svg"
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
 # pixels large.
-#html_favicon = None
+# html_favicon = None
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
@@ -247,48 +247,48 @@ html_static_path = ['../_static']
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied
 # directly to the root of the documentation.
-#html_extra_path = []
+# html_extra_path = []
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
-#html_last_updated_fmt = '%b %d, %Y'
+# html_last_updated_fmt = '%b %d, %Y'
 
 # If true, SmartyPants will be used to convert quotes and dashes to
 # typographically correct entities.
-#html_use_smartypants = True
+# html_use_smartypants = True
 
 # Custom sidebar templates, maps document names to template names.
-#html_sidebars = {}
+# html_sidebars = {}
 
 # Additional templates that should be rendered to pages, maps page names to
 # template names.
-#html_additional_pages = {}
+# html_additional_pages = {}
 
 # If false, no module index is generated.
-#html_domain_indices = True
+# html_domain_indices = True
 
 # If false, no index is generated.
-#html_use_index = True
+# html_use_index = True
 
 # If true, the index is split into individual pages for each letter.
-#html_split_index = False
+# html_split_index = False
 
 # If true, links to the reST sources are added to the pages.
-#html_show_sourcelink = True
+# html_show_sourcelink = True
 
 # If true, "Created using Sphinx" is shown in the HTML footer. Default is True.
-#html_show_sphinx = True
+# html_show_sphinx = True
 
 # If true, "(C) Copyright ..." is shown in the HTML footer. Default is True.
-#html_show_copyright = True
+# html_show_copyright = True
 
 # If true, an OpenSearch description file will be output, and all pages will
 # contain a <link> tag referring to it.  The value of this option must be the
 # base URL from which the finished HTML is served.
-#html_use_opensearch = ''
+# html_use_opensearch = ''
 
 # This is the file name suffix for HTML files (e.g. ".xhtml").
-#html_file_suffix = None
+# html_file_suffix = None
 
 # Output file base name for HTML help builder.
 htmlhelp_basename = 'ReadtheDocsTemplatedoc'
@@ -297,43 +297,43 @@ htmlhelp_basename = 'ReadtheDocsTemplatedoc'
 # -- Options for LaTeX output ---------------------------------------------
 
 latex_elements = {
-# The paper size ('letterpaper' or 'a4paper').
-#'papersize': 'letterpaper',
-
-# The font size ('10pt', '11pt' or '12pt').
-#'pointsize': '10pt',
-
-# Additional stuff for the LaTeX preamble.
-#'preamble': '',
+    # The paper size ('letterpaper' or 'a4paper').
+    # 'papersize': 'letterpaper',
+    #
+    # The font size ('10pt', '11pt' or '12pt').
+    # 'pointsize': '10pt',
+    #
+    # Additional stuff for the LaTeX preamble.
+    # 'preamble': '',
 }
 
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-  ('index', 'ReadtheDocsTemplate.tex', u'Read the Docs Template Documentation',
-   u'Read the Docs', 'manual'),
+    ('index', 'ReadtheDocsTemplate.tex', u'Read the Docs Template Documentation',
+     u'Read the Docs', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
 # the title page.
-#latex_logo = None
+# latex_logo = None
 
 # For "manual" documents, if this is true, then toplevel headings are parts,
 # not chapters.
-#latex_use_parts = False
+# latex_use_parts = False
 
 # If true, show page references after internal links.
-#latex_show_pagerefs = False
+# latex_show_pagerefs = False
 
 # If true, show URL addresses after external links.
-#latex_show_urls = False
+# latex_show_urls = False
 
 # Documents to append as an appendix to all manuals.
-#latex_appendices = []
+# latex_appendices = []
 
 # If false, no module index is generated.
-#latex_domain_indices = True
+# latex_domain_indices = True
 
 
 # -- Options for manual page output ---------------------------------------
@@ -346,7 +346,7 @@ man_pages = [
 ]
 
 # If true, show URL addresses after external links.
-#man_show_urls = False
+# man_show_urls = False
 
 
 # -- Options for Texinfo output -------------------------------------------
@@ -355,25 +355,63 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-  ('index', 'ReadtheDocsTemplate', u'Read the Docs Template Documentation',
-   u'Read the Docs', 'ReadtheDocsTemplate', 'One line description of project.',
-   'Miscellaneous'),
+    ('index', 'ReadtheDocsTemplate', u'Read the Docs Template Documentation',
+     u'Read the Docs', 'ReadtheDocsTemplate', 'One line description of project.',
+     'Miscellaneous'),
 ]
 
 # Documents to append as an appendix to all manuals.
-#texinfo_appendices = []
+# texinfo_appendices = []
 
 # If false, no module index is generated.
-#texinfo_domain_indices = True
+# texinfo_domain_indices = True
 
 # How to display URL addresses: 'footnote', 'no', or 'inline'.
-#texinfo_show_urls = 'footnote'
+# texinfo_show_urls = 'footnote'
 
 # If true, do not generate a @detailmenu in the "Top" node's menu.
-#texinfo_no_detailmenu = False
+# texinfo_no_detailmenu = False
+
 
 # Override RTD CSS theme to introduce the theme corrections
 # https://github.com/rtfd/sphinx_rtd_theme/pull/432
 def setup(app):
     app.add_stylesheet('theme_overrides.css')
-    generate_version_specific_includes(app)
+
+    # these two must be pushed in by build_docs.py
+    if "idf_target" not in app.config:
+        app.add_config_value('idf_target', None, 'env')
+        app.add_config_value('idf_targets', None, 'env')
+
+    # Breathe extension variables (depend on build_dir)
+    # note: we generate into xml_in and then copy_if_modified to xml dir
+    app.config.breathe_projects = {"esp32-idf": os.path.join(app.config.build_dir, "xml_in/")}
+    app.config.breathe_default_project = "esp32-idf"
+
+    setup_diag_font(app)
+
+
+def setup_diag_font(app):
+    # blockdiag and other tools require a font which supports their character set
+    # the font file is stored on the download server to save repo size
+
+    font_name = {
+        'en': 'DejaVuSans.ttf',
+        'zh_CN': 'NotoSansSC-Regular.otf',
+    }[app.config.language]
+
+    font_dir = os.path.join(config_dir, '_static')
+    assert os.path.exists(font_dir)
+
+    print("Downloading font file %s for %s" % (font_name, app.config.language))
+    download_file_if_missing('https://dl.espressif.com/dl/esp-idf/docs/_static/{}'.format(font_name), font_dir)
+
+    font_path = os.path.abspath(os.path.join(font_dir, font_name))
+    assert os.path.exists(font_path)
+
+    app.config.blockdiag_fontpath = font_path
+    app.config.seqdiag_fontpath = font_path
+    app.config.actdiag_fontpath = font_path
+    app.config.nwdiag_fontpath = font_path
+    app.config.rackdiag_fontpath = font_path
+    app.config.packetdiag_fontpath = font_path

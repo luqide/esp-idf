@@ -13,4 +13,8 @@ Use actual documentation generated within about 20 minutes on each commit:
 
 The above URLs are all for the master branch latest version. Click the drop-down in the bottom left to choose a stable version or to download a PDF.
 
+# Building Documentation
 
+The documentation build requirements Python 3 and running the wrapper `./build_docs.py` tool. Running `./build_docs.py --help` will give a summary of available options.
+
+See [Documenting Code](https://docs.espressif.com/projects/esp-idf/en/latest/contribute/documenting-code.html) in the ESP-IDF Programming Guide for full information about setting up to build the docs, and how to use the `./build_docs.py` tool.

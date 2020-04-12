@@ -1,18 +1,7 @@
 from __future__ import print_function
 import re
-import os
-import sys
 
-# this is a test case write with tiny-test-fw.
-# to run test cases outside tiny-test-fw,
-# we need to set environment variable `TEST_FW_PATH`,
-# then get and insert `TEST_FW_PATH` to sys path before import FW module
-test_fw_path = os.getenv('TEST_FW_PATH')
-if test_fw_path and test_fw_path not in sys.path:
-    sys.path.insert(0, test_fw_path)
-
-import TinyFW
-import IDF
+import ttfw_idf
 
 STARTING_TIMERS_REGEX = re.compile(r'Started timers, time since boot: (\d+) us')
 
@@ -35,20 +24,21 @@ FINAL_TIMER_PERIOD = 1000000
 LIGHT_SLEEP_TIME = 500000
 ONE_SHOT_TIMER_PERIOD = 5000000
 
-@IDF.idf_example_test(env_tag='Example_WIFI')
+
+@ttfw_idf.idf_example_test(env_tag='Example_WIFI')
 def test_examples_system_esp_timer(env, extra_data):
-    dut = env.get_dut('esp_timer_example', 'examples/system/esp_timer')
+    dut = env.get_dut('esp_timer_example', 'examples/system/esp_timer', dut_class=ttfw_idf.ESP32DUT)
     # start test
     dut.start_app()
     groups = dut.expect(STARTING_TIMERS_REGEX, timeout=30)
     start_time = int(groups[0])
     print('Start time: {} us'.format(start_time))
-    
+
     groups = dut.expect(TIMER_DUMP_LINE_REGEX, timeout=2)
     assert(groups[0] == 'periodic' and int(groups[1]) == INITIAL_TIMER_PERIOD)
     groups = dut.expect(TIMER_DUMP_LINE_REGEX, timeout=2)
     assert(groups[0] == 'one-shot' and int(groups[1]) == 0)
-    
+
     for i in range(0, 5):
         groups = dut.expect(PERIODIC_TIMER_REGEX, timeout=2)
         cur_time = int(groups[0])
@@ -92,6 +82,7 @@ def test_examples_system_esp_timer(env, extra_data):
         assert(diff < 100)
 
     dut.expect(STOP_REGEX, timeout=2)
+
 
 if __name__ == '__main__':
     test_examples_system_esp_timer()

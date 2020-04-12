@@ -1,28 +1,43 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
-# Setup script to build Windows tool installer with Inno Setup
+# Script to build the IDF Tools installer for Windows with Inno Setup.
+# This script should be executed inside wine-innosetup docker image.
 #
-# Designed to be run on Linux (with wine) but could be adapted to run under MSYS2 on Windows
-# pretty easily...
-#
-# - Downloads (if necessary) all tools to install to the "dl/" directory
-# - Deletes the "input" directory contains and copies everything under there
+# - Downloads all tools to install into the "dist/" directory
+# - Downloads 7z and idf_versions.txt
 # - Runs ISCC under wine to compile the installer itself
+
 set -e
+set -u
 
-cd `dirname $0`
-pushd dl
-wget --continue "https://dl.espressif.com/dl/xtensa-esp32-elf-win32-1.22.0-80-g6c4433a-5.2.0.zip"
-wget --continue "https://github.com/espressif/kconfig-frontends/releases/download/v4.6.0.0-idf-20180525/mconf-v4.6.0.0-idf-20180525-win32.zip"
-wget --continue "https://github.com/ninja-build/ninja/releases/download/v1.8.2/ninja-win.zip"
+iscc_path=$(which iscc)
+if [[ -z "$iscc_path" ]]; then
+    echo "Inno setup compiler (iscc) not found. Are you running wine-innosetup Docker image?"
+    exit 1
+fi
+
+if [[ -z "${IDF_PATH:-}" ]]; then
+    export IDF_PATH=$(cd ../../../; pwd)
+    echo "Assuming IDF_PATH: ${IDF_PATH}"
+fi
+
+echo "Downloading IDF Tools..."
+mkdir -p idf_tools_tmp
+export IDF_TOOLS_PATH=$PWD/idf_tools_tmp
+$IDF_PATH/tools/idf_tools.py --non-interactive download --platform Windows-x86_64 all
+$IDF_PATH/tools/idf_tools.py --tools-json tools_fallback.json --non-interactive download --platform Windows-x86_64 all
+mkdir -p dist
+cp idf_tools_tmp/dist/* dist/
+
+echo "Downloading 7z..."
+mkdir -p unzip
+pushd unzip
+wget --no-verbose -O 7z1900-extra.7z https://www.7-zip.org/a/7z1900-extra.7z
+7zr e -y 7z1900-extra.7z
 popd
 
-rm -rf input/*
-pushd input
-unzip ../dl/xtensa-esp32-elf-win32-1.22.0-80-g6c4433a-5.2.0.zip
-unzip ../dl/mconf-v4.6.0.0-idf-20180525-win32.zip
-unzip ../dl/ninja-win.zip
-popd
+echo "Downloading idf_versions.txt..."
+wget --no-verbose -O idf_versions.txt https://dl.espressif.com/dl/esp-idf/idf_versions.txt
 
-wine "C:\Program Files\Inno Setup 5\ISCC.exe" "`winepath -w ./idf_tool_setup.iss`"
-
+echo "Running ISCC..."
+iscc idf_tool_setup.iss

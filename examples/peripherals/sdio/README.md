@@ -25,17 +25,15 @@ is okay in 1-bit mode to leave DAT3 of host disconnected.
 Please run wires between the slave and master to make the example function
 (pins are the same for the host and the slave):
 
-======== =========
- Signal   GPIO NUM
-======== =========
- CLK      GPIO14  
- CMD      GPIO15  
- DAT0     GPIO2   
- DAT1     GPIO4   
- DAT2     GPIO12
- DAT3     GPIO13
- Ground   GND     
-======== =========
+| Signal | GPIO NUM |
+|--------|----------|
+| CLK    | GPIO-14  |
+| CMD    | GPIO-15  |
+| DAT0   | GPIO-2   |
+| DAT1   | GPIO-4   |
+| DAT2   | GPIO-12  |
+| DAT3   | GPIO-13  |
+| Ground | GND      |
 
 CMD and DAT0-3 lines require to be pulled up by 50KOhm resistors even in
 1-bit mode. See *Board Compability* below for details. In 1-bit mode, the
@@ -86,7 +84,7 @@ better or disabling the HS mode in menuconfig.
     to pull down DAT2 line to set proper flash voltage. This conflicts with SDIO
     pullup requirements. Currently devkits using PICO-D4 and Wroom-32 series
     modules have this problem. You can either:
-    
+
         - Use Wrover Kit v3 which integrates a Wrover module
         - Still use PICO-D4 or Wroom-32 Series modules as the slave, however:
             - Don't connect the DAT2 pin and leave it floating. This means
@@ -103,13 +101,8 @@ and ``api_reference/peripherals/sd_pullup_requirements`` to see more
 descriptions about pullups and MTDI requirements and solutions of official
 modules and devkits.
 
-## About esp_slave component in this example
+## About `esp_serial_slave_link` component used in this example
 
-The component in this example shows how to communicate with esp32 sdio slave
-correctly. However, currently it is for example purpose only.
-
-The example shows how to talk with the slave, but doesn't show how to handle
-exceptions. Assertion fails if any of the preconditions (connections,
-grounding, slave data preparation, etc.) is not met.
-
-Please do check and handle the return value in your real product.
+`esp_serial_slave_link` component in the IDF is used to communicate to a ESP slave device.
+When the `esp_serial_slave_link` device is initialized with an `essl_sdio_config_t` structure,
+the `esp_serial_slave_link` can be used to communicate with an ESP32 SDIO slave.

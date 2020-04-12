@@ -57,7 +57,7 @@ static SemaphoreHandle_t done_sem;
 
 static void can_transmit_task(void *arg)
 {
-    can_message_t tx_msg = {.data_length_code = 1, .identifier = MSG_ID, .flags = CAN_MSG_FLAG_SELF};
+    can_message_t tx_msg = {.data_length_code = 1, .identifier = MSG_ID, .self = 1};
     for (int iter = 0; iter < NO_OF_ITERS; iter++) {
         xSemaphoreTake(tx_sem, portMAX_DELAY);
         for (int i = 0; i < NO_OF_MSGS; i++) {
@@ -73,11 +73,12 @@ static void can_transmit_task(void *arg)
 static void can_receive_task(void *arg)
 {
     can_message_t rx_message;
+
     for (int iter = 0; iter < NO_OF_ITERS; iter++) {
         xSemaphoreTake(rx_sem, portMAX_DELAY);
         for (int i = 0; i < NO_OF_MSGS; i++) {
             //Receive message and print message data
-            ESP_ERROR_CHECK(can_receive(&rx_message, portMAX_DELAY))
+            ESP_ERROR_CHECK(can_receive(&rx_message, portMAX_DELAY));
             ESP_LOGI(EXAMPLE_TAG, "Msg received - Data = %d", rx_message.data[0]);
         }
         //Indicate to control task all messages received for this iteration
@@ -107,7 +108,7 @@ static void can_control_task(void *arg)
     vTaskDelete(NULL);
 }
 
-void app_main()
+void app_main(void)
 {
     //Create tasks and synchronization primitives
     tx_sem = xSemaphoreCreateBinary();
